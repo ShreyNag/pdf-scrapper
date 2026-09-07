@@ -91,14 +91,21 @@ async def chat_with_doc(request: ChatRequest):
         raise HTTPException(status_code=404, detail="Document not found. Please upload the PDF first.")
 
     # Retrieve relevant context
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+    retriever = vector_store.as_retriever(search_kwargs={"k": 6})
     relevant_docs = retriever.invoke(request.question)
     context = "\n\n".join([doc.page_content for doc in relevant_docs])
 
     # Augment the prompt
     prompt = f"""
-    You are a helpful assistant. Answer the following question based ONLY on the context provided below.
-    If the answer is not found in the context, say "I cannot answer this question based on the provided document."
+    You are a helpful assistant. Use the context below (taken from the user's uploaded document)
+    to answer the question, which may ask for facts, a summary, or advice/help based on the document
+    (e.g. interview prep, feedback, or suggestions).
+
+    Ground your answer in the context — don't invent facts about the document that aren't there —
+    but you may reason about and build on the context to be genuinely helpful.
+
+    If the context has nothing relevant to the question at all, say
+    "I cannot answer this question based on the provided document."
 
     Context:
     {context}
