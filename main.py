@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 
 # Imports for LangChain and Gemini
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 import google.generativeai as genai
@@ -92,7 +92,7 @@ async def chat_with_doc(request: ChatRequest):
 
     # Retrieve relevant context
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-    relevant_docs = retriever.get_relevant_documents(request.question)
+    relevant_docs = retriever.invoke(request.question)
     context = "\n\n".join([doc.page_content for doc in relevant_docs])
 
     # Augment the prompt
@@ -109,7 +109,7 @@ async def chat_with_doc(request: ChatRequest):
 
     # Generate the answer
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-flash-latest')
         response = model.generate_content(prompt)
         return {"answer": response.text}
     except Exception as e:

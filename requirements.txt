@@ -4,6 +4,7 @@ python-multipart
 pymupdf
 python-dotenv
 langchain
+langchain-text-splitters
 langchain-community
 faiss-cpu
 sentence-transformers
