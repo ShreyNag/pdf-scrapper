@@ -2,6 +2,7 @@
 
 # 1. Import necessary tools
 import os
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from pydantic import BaseModel
 import fitz
@@ -17,7 +18,8 @@ from langchain_community.embeddings import SentenceTransformerEmbeddings
 import google.generativeai as genai
 
 # --- CONFIGURE GEMINI API KEY ---
-# Load the API key from the environment variable
+# Load environment variables from .env, then read the API key
+load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable not set!")
