@@ -77,15 +77,20 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
 RELEVANCE_THRESHOLD = 1.0
 
 @app.post("/upload-pdf/")
-async def upload_pdf(file: UploadFile = File(...)):
+def upload_pdf(file: UploadFile = File(...)):
     """
     Processes a PDF, extracts its text, creates a vector store,
     and stores it in memory.
     """
+    # def, not async def: PDF parsing, embedding, and FAISS indexing below
+    # are all synchronous, blocking, CPU-bound work. FastAPI runs a sync
+    # endpoint in a threadpool automatically, which is exactly what that
+    # needs; leaving it async def would block the whole event loop (and
+    # every other in-flight request) for the duration of one upload.
     if file.content_type != "application/pdf" or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    contents = await file.read()
+    contents = file.file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_BYTES // (1024 * 1024)}MB.")
 
@@ -149,10 +154,13 @@ async def upload_pdf(file: UploadFile = File(...)):
     }
 
 @app.post("/chat/")
-async def chat_with_doc(request: ChatRequest):
+def chat_with_doc(request: ChatRequest):
     """
     Answers a question based on the content of a previously uploaded PDF.
     """
+    # def, not async def: FAISS search and model.generate_content() are both
+    # blocking calls. FastAPI offloads sync endpoints to a threadpool, so
+    # this keeps one slow Gemini call from stalling every other request.
     entry = document_store.get(request.doc_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"No document found for id '{request.doc_id}'. Please upload the PDF first.")
