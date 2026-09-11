@@ -18,6 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
+# TODO: SentenceTransformerEmbeddings is deprecated in favor of
+# langchain_huggingface.HuggingFaceEmbeddings. Not migrated here because
+# langchain-huggingface isn't in the currently pinned dependency set and
+# adding it risks version conflicts with the pinned langchain/langchain-community.
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 import google.generativeai as genai
 
