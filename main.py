@@ -29,6 +29,11 @@ if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable not set!")
 genai.configure(api_key=GOOGLE_API_KEY)
 
+# 'gemini-flash-latest' is a floating alias whose behaviour can change
+# without warning. Default to it for convenience, but let a deployment
+# pin an exact model via GEMINI_MODEL.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+
 # Singleton: loading the ~90MB sentence-transformer model from disk is expensive,
 # and the model itself is stateless, so we load it once at startup and reuse it
 # for every upload instead of reloading it per-request.
@@ -39,14 +44,18 @@ app = FastAPI()
 
 # --- CORS MIDDLEWARE CONFIGURATION ---
 # This allows our frontend to communicate with our backend.
-origins = ["*"] # Allow all origins for development
+# allow_origins=["*"] combined with allow_credentials=True is rejected by
+# browsers per the CORS spec (credentialed requests can't use a wildcard
+# origin), so credentials would silently never work. Nothing here uses
+# cookies, so allow_credentials=False and an explicit origin list instead.
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"], # Allow all methods (GET, POST, etc.)
-    allow_headers=["*"], # Allow all headers
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 # This is our simple in-memory database: it lives only in this process's
@@ -208,7 +217,7 @@ def chat_with_doc(request: ChatRequest):
 
     # Generate the answer
     try:
-        model = genai.GenerativeModel('gemini-flash-latest')
+        model = genai.GenerativeModel(GEMINI_MODEL)
         response = model.generate_content(prompt)
         return {"answer": response.text, "sources": sources, "context_found": True}
     except Exception as e:
