@@ -70,6 +70,12 @@ class ChatRequest(BaseModel):
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
 
+# L2 distance cutoff below which a chunk counts as "relevant" — chosen by
+# inspecting scores for on-topic vs. off-topic questions against this
+# embedding model, not derived from any formula. Re-check by hand if you
+# swap embedding models, since distance scales differ between models.
+RELEVANCE_THRESHOLD = 1.0
+
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
     """
@@ -155,11 +161,25 @@ async def chat_with_doc(request: ChatRequest):
 
     # Retrieve relevant context, along with each chunk's similarity score
     # so we can cite pages and report source excerpts back to the caller.
+    #
+    # NOTE: this FAISS index (default distance strategy, i.e. raw L2) returns
+    # a DISTANCE, not a similarity — LOWER scores mean MORE similar. Do not
+    # flip this comparison without re-checking, or the threshold silently
+    # inverts and every query either always or never passes.
     results = vector_store.similarity_search_with_score(request.question, k=6)
-    context = "\n\n".join(f"[Page {doc.metadata.get('page', '?')}] {doc.page_content}" for doc, _ in results)
+    relevant_results = [(doc, score) for doc, score in results if score <= RELEVANCE_THRESHOLD]
+
+    if not relevant_results:
+        return {
+            "answer": "I couldn't find any content in this document relevant to your question.",
+            "sources": [],
+            "context_found": False,
+        }
+
+    context = "\n\n".join(f"[Page {doc.metadata.get('page', '?')}] {doc.page_content}" for doc, _ in relevant_results)
     sources = [
         {"page": doc.metadata.get("page"), "score": float(score), "excerpt": doc.page_content[:200]}
-        for doc, score in results
+        for doc, score in relevant_results
     ]
 
     # Augment the prompt
@@ -185,7 +205,7 @@ async def chat_with_doc(request: ChatRequest):
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         response = model.generate_content(prompt)
-        return {"answer": response.text, "sources": sources}
+        return {"answer": response.text, "sources": sources, "context_found": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating response from Gemini: {str(e)}")
 
