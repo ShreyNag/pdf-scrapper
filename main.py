@@ -192,15 +192,12 @@ def chat_with_doc(request: ChatRequest):
 
     # Augment the prompt
     prompt = f"""
-    You are a helpful assistant. Use the context below (taken from the user's uploaded document)
-    to answer the question, which may ask for facts, a summary, or advice/help based on the document
-    (e.g. interview prep, feedback, or suggestions).
+    You are a document assistant. Answer the question using ONLY the context below,
+    taken from the user's uploaded document. Do not use outside knowledge, and do not
+    fill gaps with assumptions — if the context is insufficient to answer fully, say so
+    explicitly rather than guessing.
 
-    Ground your answer in the context — don't invent facts about the document that aren't there —
-    but you may reason about and build on the context to be genuinely helpful.
-
-    If the context has nothing relevant to the question at all, say
-    "I cannot answer this question based on the provided document."
+    Where relevant, reference the page number(s) shown in the context (e.g. "(page 3)").
 
     Context:
     {context}
