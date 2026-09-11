@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 
 # Imports for LangChain and Gemini
+from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import SentenceTransformerEmbeddings
@@ -91,10 +92,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         if pdf_document.is_encrypted:
             raise HTTPException(status_code=400, detail="This PDF is encrypted/password-protected and cannot be processed.")
 
-        full_text = ""
+        # Extract page-by-page (rather than into one big string) so page
+        # numbers survive as metadata and citations are possible later.
+        pages = []
         for page_num in range(len(pdf_document)):
             page = pdf_document.load_page(page_num)
-            full_text += page.get_text()
+            pages.append(Document(page_content=page.get_text(), metadata={"page": page_num + 1}))
     except HTTPException:
         raise
     except Exception as e:
@@ -102,22 +105,24 @@ async def upload_pdf(file: UploadFile = File(...)):
     finally:
         pdf_document.close()
 
+    full_text = "".join(p.page_content for p in pages)
     if not full_text.strip():
         raise HTTPException(
             status_code=422,
             detail="No extractable text found in this PDF. It is probably a scanned document that needs OCR.",
         )
 
-    # Chunk the text
+    # Chunk the pages; split_documents (rather than split_text) propagates
+    # each page's metadata onto the chunks it produces.
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=100,
         length_function=len,
     )
-    text_chunks = text_splitter.split_text(full_text)
+    text_chunks = text_splitter.split_documents(pages)
 
     # Create the vector store using the shared, module-level embeddings model
-    vector_store = FAISS.from_texts(texts=text_chunks, embedding=EMBEDDINGS)
+    vector_store = FAISS.from_documents(documents=text_chunks, embedding=EMBEDDINGS)
 
     # Key by a server-generated id rather than the filename: two users
     # uploading "resume.pdf" must not overwrite each other's document.
@@ -148,10 +153,14 @@ async def chat_with_doc(request: ChatRequest):
     document_store.move_to_end(request.doc_id)  # mark as recently used so it survives eviction
     vector_store = entry["vector_store"]
 
-    # Retrieve relevant context
-    retriever = vector_store.as_retriever(search_kwargs={"k": 6})
-    relevant_docs = retriever.invoke(request.question)
-    context = "\n\n".join([doc.page_content for doc in relevant_docs])
+    # Retrieve relevant context, along with each chunk's similarity score
+    # so we can cite pages and report source excerpts back to the caller.
+    results = vector_store.similarity_search_with_score(request.question, k=6)
+    context = "\n\n".join(f"[Page {doc.metadata.get('page', '?')}] {doc.page_content}" for doc, _ in results)
+    sources = [
+        {"page": doc.metadata.get("page"), "score": float(score), "excerpt": doc.page_content[:200]}
+        for doc, score in results
+    ]
 
     # Augment the prompt
     prompt = f"""
@@ -176,7 +185,7 @@ async def chat_with_doc(request: ChatRequest):
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         response = model.generate_content(prompt)
-        return {"answer": response.text}
+        return {"answer": response.text, "sources": sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating response from Gemini: {str(e)}")
 
