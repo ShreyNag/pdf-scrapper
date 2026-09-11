@@ -3,6 +3,7 @@
 # 1. Import necessary tools
 import os
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -47,8 +48,19 @@ app.add_middleware(
     allow_headers=["*"], # Allow all headers
 )
 
-# This dictionary will act as our simple in-memory database.
-document_store = {}
+# This is our simple in-memory database: it lives only in this process's
+# memory, so it does NOT survive a restart, and it does NOT work across
+# multiple gunicorn workers, since an upload handled by one worker is
+# invisible to the others. The real fix for either problem is persisting
+# the FAISS index (FAISS.save_local/load_local) or using a hosted vector
+# store — out of scope for this project.
+#
+# It's capped at MAX_DOCUMENTS via an OrderedDict acting as an LRU cache:
+# document_store.move_to_end() on access keeps active documents alive,
+# and the oldest (least-recently-used) entry is evicted once the cap is
+# exceeded, so memory doesn't grow unbounded.
+MAX_DOCUMENTS = 20
+document_store: "OrderedDict[str, dict]" = OrderedDict()
 
 # Pydantic model to define the structure of chat requests
 class ChatRequest(BaseModel):
@@ -88,6 +100,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         "filename": file.filename,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     }
+    if len(document_store) > MAX_DOCUMENTS:
+        document_store.popitem(last=False)  # evict the oldest (least-recently-used) entry
 
     return {
         "doc_id": doc_id,
@@ -104,6 +118,7 @@ async def chat_with_doc(request: ChatRequest):
     entry = document_store.get(request.doc_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"No document found for id '{request.doc_id}'. Please upload the PDF first.")
+    document_store.move_to_end(request.doc_id)  # mark as recently used so it survives eviction
     vector_store = entry["vector_store"]
 
     # Retrieve relevant context
