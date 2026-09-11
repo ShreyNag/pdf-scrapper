@@ -2,6 +2,8 @@
 
 # 1. Import necessary tools
 import os
+import uuid
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from pydantic import BaseModel
@@ -50,7 +52,7 @@ document_store = {}
 
 # Pydantic model to define the structure of chat requests
 class ChatRequest(BaseModel):
-    filename: str
+    doc_id: str
     question: str
 
 @app.post("/upload-pdf/")
@@ -77,9 +79,18 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     # Create the vector store using the shared, module-level embeddings model
     vector_store = FAISS.from_texts(texts=text_chunks, embedding=EMBEDDINGS)
-    document_store[file.filename] = vector_store
+
+    # Key by a server-generated id rather than the filename: two users
+    # uploading "resume.pdf" must not overwrite each other's document.
+    doc_id = uuid.uuid4().hex
+    document_store[doc_id] = {
+        "vector_store": vector_store,
+        "filename": file.filename,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
 
     return {
+        "doc_id": doc_id,
         "filename": file.filename,
         "status": "Successfully processed and indexed.",
         "total_chunks": len(text_chunks)
@@ -90,9 +101,10 @@ async def chat_with_doc(request: ChatRequest):
     """
     Answers a question based on the content of a previously uploaded PDF.
     """
-    vector_store = document_store.get(request.filename)
-    if not vector_store:
-        raise HTTPException(status_code=404, detail="Document not found. Please upload the PDF first.")
+    entry = document_store.get(request.doc_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"No document found for id '{request.doc_id}'. Please upload the PDF first.")
+    vector_store = entry["vector_store"]
 
     # Retrieve relevant context
     retriever = vector_store.as_retriever(search_kwargs={"k": 6})

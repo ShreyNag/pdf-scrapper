@@ -70,15 +70,15 @@
         const chatForm = document.getElementById('chat-form');
         const questionInput = document.getElementById('question-input');
 
+        let currentDocId = '';
         let currentFilename = '';
 
         // Handle PDF Upload
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const formData = new FormData();
             formData.append('file', pdfFile.files[0]);
-            currentFilename = pdfFile.files[0].name;
 
             statusDiv.innerHTML = '<p class="text-blue-600">Uploading and processing... This may take a moment.</p>';
 
@@ -93,6 +93,8 @@
                 }
 
                 const result = await response.json();
+                currentDocId = result.doc_id;
+                currentFilename = result.filename;
                 statusDiv.innerHTML = `<p class="text-green-600">✅ Ready to chat with <strong>${result.filename}</strong> (${result.total_chunks} chunks created).</p>`;
                 chatSection.classList.remove('hidden');
                 
@@ -122,7 +124,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        filename: currentFilename,
+                        doc_id: currentDocId,
                         question: question,
                     }),
                 });
