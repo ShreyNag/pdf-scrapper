@@ -67,19 +67,46 @@ class ChatRequest(BaseModel):
     doc_id: str
     question: str
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
+
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
     """
     Processes a PDF, extracts its text, creates a vector store,
     and stores it in memory.
     """
+    if file.content_type != "application/pdf" or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
     contents = await file.read()
-    pdf_document = fitz.open(stream=contents, filetype="pdf")
-    full_text = ""
-    for page_num in range(len(pdf_document)):
-        page = pdf_document.load_page(page_num)
-        full_text += page.get_text()
-    pdf_document.close()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_BYTES // (1024 * 1024)}MB.")
+
+    try:
+        pdf_document = fitz.open(stream=contents, filetype="pdf")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not open file as a PDF: {e}")
+
+    try:
+        if pdf_document.is_encrypted:
+            raise HTTPException(status_code=400, detail="This PDF is encrypted/password-protected and cannot be processed.")
+
+        full_text = ""
+        for page_num in range(len(pdf_document)):
+            page = pdf_document.load_page(page_num)
+            full_text += page.get_text()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to extract text from PDF: {e}")
+    finally:
+        pdf_document.close()
+
+    if not full_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No extractable text found in this PDF. It is probably a scanned document that needs OCR.",
+        )
 
     # Chunk the text
     text_splitter = RecursiveCharacterTextSplitter(
