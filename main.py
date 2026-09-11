@@ -25,6 +25,11 @@ if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable not set!")
 genai.configure(api_key=GOOGLE_API_KEY)
 
+# Singleton: loading the ~90MB sentence-transformer model from disk is expensive,
+# and the model itself is stateless, so we load it once at startup and reuse it
+# for every upload instead of reloading it per-request.
+EMBEDDINGS = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+
 # 2. Create the FastAPI app instance
 app = FastAPI()
 
@@ -70,9 +75,8 @@ async def upload_pdf(file: UploadFile = File(...)):
     )
     text_chunks = text_splitter.split_text(full_text)
 
-    # Create embeddings and the vector store
-    embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-    vector_store = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
+    # Create the vector store using the shared, module-level embeddings model
+    vector_store = FAISS.from_texts(texts=text_chunks, embedding=EMBEDDINGS)
     document_store[file.filename] = vector_store
 
     return {
